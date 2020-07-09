@@ -1,0 +1,335 @@
+---
+title: "Statistical Machine Learning - Final Project"
+author: "Ivan Wolansky"
+date: "5/8/2020"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r, message = FALSE, warning = FALSE}
+# For the Models
+library(caret)
+```
+
+First, I read in the data, viewed it, and split it into features and labels
+
+```{r, results='hide'}
+df <- read.csv("breast_cancer_train.csv")
+
+# non-relapse = 0, relapse = 1
+head(df)
+
+y <- as.factor(df[, 1])
+X <- as.matrix(df[, 2:ncol(df)])
+```
+
+Next, I did not look at summary(df) because there were far too many features, but instead I checked for the presence of NAs (and found that there were none).
+
+```{r}
+anyNA(df)
+```
+
+Next, I split the data into training and holdout, with 20% of the data being the holdout/validation set (I called it test).
+
+```{r}
+sample <- sample(seq_len(nrow(df)), size = floor(0.8 * nrow(df)), replace = F)
+X_train <- X[sample, ]
+X_test <- X[-sample, ]
+y_train <- y[sample]
+y_test <- y[-sample]
+```
+
+After this, I chose to reduce the dimensionality of the data. I wanted to do this instead of feature selection because I wanted to make sure that I did not remove features that could be important in the test set. Therefore, I used PCA which created new variables that were independent of one another. This makes sure that when the test data is run on my model, that my model is not overfit. Additionally, instead of running PCA on the entire dataset, I ran it on the training set in order to mimic how this would be done when presented with never seen before data. I opted not to scale because in the instructions we were told the data was already normalized. I chose to use the principal components that explained 95% of the variation in the training data which was equal to 48 components.
+
+```{r, eval=FALSE}
+pca <- prcomp(X_train, scale. = FALSE, center=TRUE, retx = TRUE)
+
+screeplot(pca, main="PCA on Training Data", xlab="Principal Components in Order from 1 to 10")
+
+# selecting components that explain 95% of variance and making new pca
+pca_95 <- prcomp(X_train, scale. = FALSE, center=TRUE, retx = TRUE, rank.=ncol(pca$x[,summary(pca)$importance[3, ] <= 0.95]))
+
+save(pca_95, file="pca_95.RData")
+
+X_train_pca <- pca_95$x
+X_test_pca <- predict(pca_95, newdata=X_test)
+```
+
+Next, I created a dataframe so that I could view some of the information in the new principal components.
+
+```{r, eval=FALSE}
+train_pca <- cbind(X_train_pca, ifelse(as.numeric(y_train) == 1, 0, 1))
+test_pca <- cbind(X_test_pca, ifelse(as.numeric(y_test) == 1, 0, 1))
+df_pca <- rbind(train_pca, test_pca)
+head(df_pca)
+summary(df_pca)
+```
+
+After this, I created a dataframe so that I could compare each model that I tested, along with its Accuracy score and CV Accuracies. Using the CV Accuracies meant that I could see which model performed the best in training and had stable accuracy. Kappa was used to see which model was best when compared with a model that guessed randomly.
+
+```{r, eval=FALSE}
+model_types <- c("Elastic Net", "KNN", "Radial SVM", "Decision Tree", "Random Forest", "Adaboost Classification Trees", "Naive Bayes")
+model_accuracies <- data.frame(row.names = model_types,
+                               "CV_Accuracy" = rep(NA, length(model_types)),
+                               "CV_Kappa" = rep(NA, length(model_types)),
+                               "Test_Accuracy" = rep(NA, length(model_types)),
+                               "Test_Kappa" = rep(NA, length(model_types)))
+```
+
+I first tried to run an Elastic Net.
+
+```{r, eval=FALSE}
+trControl <- trainControl(
+                         method = "repeatedcv", 
+                         number = 10,
+                         repeats = 10
+                         )
+
+elastic_net_cv_fit <- train(
+                      X_train_pca, 
+                      y_train, 
+                      method = "glmnet",
+                      tuneLength = 10, 
+                      trControl = trControl, 
+                      metric="Accuracy"
+                      )
+
+
+elastic_net_pred <- predict(elastic_net_cv_fit, X_test_pca)
+
+confusionMatrix(table(elastic_net_pred, y_test))
+
+elastic_net_acc <- mean(elastic_net_pred == y_test)
+
+cat("The accuracy of the Elastic Net model is", elastic_net_acc * 100, "%")
+
+model_accuracies["Elastic Net", "CV_Accuracy"] <- elastic_net_cv_fit$results[elastic_net_cv_fit$bestTune$alpha == elastic_net_cv_fit$results$alpha & elastic_net_cv_fit$bestTune$lambda == elastic_net_cv_fit$result$lambda, ]$Accuracy * 100
+model_accuracies["Elastic Net", "CV_Kappa"] <- elastic_net_cv_fit$results[elastic_net_cv_fit$bestTune$alpha == elastic_net_cv_fit$results$alpha & elastic_net_cv_fit$bestTune$lambda == elastic_net_cv_fit$result$lambda, ]$Kappa
+model_accuracies["Elastic Net", "Test_Accuracy"] <- elastic_net_acc * 100
+model_accuracies["Elastic Net", "Test_Kappa"] <- confusionMatrix(table(elastic_net_pred, y_test))$overall["Kappa"]
+```
+
+Next, I tried a KNN Classifier.
+
+```{r, eval=FALSE}
+trControl <- trainControl(
+                          method  = "repeatedcv",
+                          number  = 10,
+                          repeats = 10
+                          )
+
+knn_cv_fit <- train(
+                    X_train_pca, 
+                    y_train,
+                    method = "knn",
+                    tuneGrid = expand.grid(k = 1:10),
+                    trControl = trControl,
+                    metric = "Accuracy"
+                    )
+
+
+knn_pred <- predict(knn_cv_fit$finalModel, X_test_pca, type="class")
+confusionMatrix(table(knn_pred, y_test))
+
+knn_acc <- mean(knn_pred == y_test)
+
+cat("The accuracy of the KNN Classifier is", knn_acc * 100, "%")
+
+model_accuracies["KNN", "CV_Accuracy"] <- knn_cv_fit$results[knn_cv_fit$bestTune$k == knn_cv_fit$results$k, ]$Accuracy * 100
+model_accuracies["KNN", "CV_Kappa"] <- knn_cv_fit$results[knn_cv_fit$bestTune$k == knn_cv_fit$results$k, ]$Kappa
+model_accuracies["KNN", "Test_Accuracy"] <- knn_acc * 100
+model_accuracies["KNN", "Test_Kappa"] <- confusionMatrix(table(knn_pred, y_test))$overall["Kappa"]
+```
+
+Then, I tried Linear SVM.
+
+```{r, eval=FALSE}
+trControl <- trainControl(
+                          method  = "repeatedcv",
+                          number  = 10,
+                          repeats = 10
+                          )
+
+svm_cv_fit <- train(
+                   x = X_train_pca,
+                   y = y_train,
+                   method = 'svmRadial',
+                   trControl = trControl,
+                   tuneLength = 20,
+                   metric = 'Accuracy'
+                   )
+
+svm_pred <- predict(svm_cv_fit, X_test_pca)
+
+confusionMatrix(table(svm_pred, y_test))
+
+svm_acc <- mean(svm_pred == y_test)
+
+cat("The accuracy of the best SVM model is", svm_acc * 100, "% with a Radial kernel")
+
+model_accuracies["Radial SVM", "CV_Accuracy"] <- svm_cv_fit$results[svm_cv_fit$bestTune$C == svm_cv_fit$results$C, ]$Accuracy * 100
+model_accuracies["Radial SVM", "CV_Kappa"] <- svm_cv_fit$results[svm_cv_fit$bestTune$C == svm_cv_fit$results$C, ]$Kappa
+model_accuracies["Radial SVM", "Test_Accuracy"] <- svm_acc * 100
+model_accuracies["Radial SVM", "Test_Kappa"] <- confusionMatrix(table(svm_pred, y_test))$overall["Kappa"]
+```
+
+I then built a Decision Tree Classifier.
+
+```{r, eval=FALSE}
+trControl <- trainControl(
+                          method = "repeatedcv",
+                          number = 10,
+                          repeats = 10
+                          )
+
+decision_tree_cv_fit <- train(
+                        x=X_train_pca,
+                        y=y_train,
+                        method = "rpart",
+                        tuneLength=50,
+                        metric="Accuracy",
+                        trControl = trControl
+                        )
+
+decision_tree_pred <- predict(decision_tree_cv_fit$finalModel, data.frame(X_test_pca), type = 'class')
+
+confusionMatrix(table(decision_tree_pred, y_test))
+
+decision_tree_acc <-mean(decision_tree_pred == y_test)
+
+cat("The accuracy of the best Decision Tree Classifier is", decision_tree_acc * 100, "%")
+
+model_accuracies["Decision Tree", "CV_Accuracy"] <- decision_tree_cv_fit$results[decision_tree_cv_fit$bestTune$cp == decision_tree_cv_fit$results$cp, ]$Accuracy * 100
+model_accuracies["Decision Tree", "CV_Kappa"] <- decision_tree_cv_fit$results[decision_tree_cv_fit$bestTune$cp == decision_tree_cv_fit$results$cp, ]$Kappa
+model_accuracies["Decision Tree", "Test_Accuracy"] <- decision_tree_acc * 100
+model_accuracies["Decision Tree", "Test_Kappa"] <- confusionMatrix(table(decision_tree_pred, y_test))$overall["Kappa"]
+```
+
+After this, I built a Random Forest.
+
+```{r, eval=FALSE}
+trControl <- trainControl(
+                         method="repeatedcv", 
+                         number=10, 
+                         repeats=10
+                         )
+
+rf_cv_fit <- train(
+                  X_train_pca, 
+                  y_train, 
+                  method="rf", 
+                  metric="Accuracy", 
+                  tuneLength=20, 
+                  trControl=trControl)
+
+rf_pred <- predict(rf_cv_fit$finalModel, X_test_pca, type="class")
+
+confusionMatrix(table(rf_pred, y_test))
+
+rf_acc <-mean(rf_pred == y_test)
+
+cat("The accuracy of the best Random Forest is", rf_acc * 100, "%")
+
+model_accuracies["Random Forest", "CV_Accuracy"] <- rf_cv_fit$results[rf_cv_fit$bestTune$mtry == rf_cv_fit$results$mtry, ]$Accuracy * 100
+model_accuracies["Random Forest", "CV_Kappa"] <- rf_cv_fit$results[rf_cv_fit$bestTune$mtry == rf_cv_fit$results$mtry, ]$Kappa
+model_accuracies["Random Forest", "Test_Accuracy"] <- rf_acc * 100
+model_accuracies["Random Forest", "Test_Kappa"] <- confusionMatrix(table(rf_pred, y_test))$overall["Kappa"]
+```
+
+Next, I tried boosting Classification Trees with Adaboost.
+
+```{r, eval=FALSE}
+trControl <- trainControl(
+                         method="repeatedcv", 
+                         number=10, 
+                         repeats=10
+                         )
+
+ada_cv_fit <- train(
+                   X_train_pca, 
+                   y_train, 
+                   method="adaboost", 
+                   metric="Accuracy",
+                   trControl=trControl)
+
+ada_pred <- predict(ada_cv_fit$finalModel, X_test_pca, type="class")$class
+
+confusionMatrix(table(ada_pred, y_test))
+
+ada_acc <- mean(ada_pred == y_test)
+
+cat("The accuracy of the best Random Forest is", ada_acc * 100, "%")
+
+model_accuracies["Adaboost Classification Trees", "CV_Accuracy"] <- ada_cv_fit$results[ada_cv_fit$bestTune$nIter == ada_cv_fit$results$nIter & ada_cv_fit$bestTune$method == ada_cv_fit$results$method, ]$Accuracy * 100
+model_accuracies["Adaboost Classification Trees", "CV_Kappa"] <- ada_cv_fit$results[ada_cv_fit$bestTune$nIter == ada_cv_fit$results$nIter & ada_cv_fit$bestTune$method == ada_cv_fit$results$method, ]$Kappa
+model_accuracies["Adaboost Classification Trees", "Test_Accuracy"] <- ada_acc * 100
+model_accuracies["Adaboost Classification Trees", "Test_Kappa"] <- confusionMatrix(table(ada_pred, y_test))$overall["Kappa"]
+```
+
+Finally, I built a Naive Bayes Classifier.
+
+```{r, warning=FALSE, eval=FALSE}
+trControl <- trainControl(
+                         method = "repeatedcv", 
+                         number = 10,
+                         repeats = 10
+                         )
+
+nb_cv_fit <- train(
+                  X_train_pca,
+                  y_train,
+                  method = "nb",
+                  trControl = trControl,
+                  tuneLength = 100,
+                  metric = "Accuracy"
+                  )
+
+nb_pred <- predict(nb_cv_fit$finalModel, X_test_pca, type="class")
+
+confusionMatrix(table(nb_pred$class, y_test))
+
+nb_acc <- mean(nb_pred$class == y_test)
+
+cat("The accuracy of the Naive Bayes Classifier is", nb_acc * 100, "%")
+
+model_accuracies["Naive Bayes", "CV_Accuracy"] <- nb_cv_fit$results[nb_cv_fit$bestTune$fL == nb_cv_fit$results$fL & nb_cv_fit$bestTune$usekernel == nb_cv_fit$results$usekernel & nb_cv_fit$bestTune$adjust == nb_cv_fit$results$adjust, ]$Accuracy * 100
+model_accuracies["Naive Bayes", "CV_Kappa"] <- nb_cv_fit$results[nb_cv_fit$bestTune$fL == nb_cv_fit$results$fL & nb_cv_fit$bestTune$usekernel == nb_cv_fit$results$usekernel & nb_cv_fit$bestTune$adjust == nb_cv_fit$results$adjust, ]$Kappa
+model_accuracies["Naive Bayes", "Test_Accuracy"] <- nb_acc * 100
+model_accuracies["Naive Bayes", "Test_Kappa"] <- confusionMatrix(table(nb_pred$class, y_test))$overall["Kappa"]
+```
+
+Next, I looked at the different accuracies of each model and the minimum and maximum accuracy they each achieved in cross-validation. I also looked at each Kappa. I concluded that the best model (and model I would use) was the Random Forest Model. This waas based off of the fact that it had fairly high cross-validation accuracy, overall test accuracy, a high training Kappa, and the highest testing Kappa. I thought that the best model would be naive bayes because it works so well with PCA, but that did not end up being the case.
+
+```{r}
+# save(model_accuracies, file="model_accuracies.RData")
+load(file="model_accuracies.RData")
+model_accuracies
+```
+
+Therefore, I saved this model for use with the never seen before test set.
+
+```{r, eval=FALSE}
+final_model <- rf_cv_fit$finalModel
+save(final_model, file="final_model.RData")
+```
+
+This is the wrapper function for the final model.
+
+```{r}
+final_model_prediction <- function(test_data) {
+  library(caret)
+  load(file="pca_95.RData")
+  load(file="final_model.RData")
+  test <- predict(pca_95, newdata=as.matrix(test_data))
+  final_pred <- predict(final_model, test, type = "class")
+  print(final_pred)
+  write.csv(final_pred, file="final_predictions.csv")
+}
+```
+
+Here is where you can input your data for the final test.
+
+```{r}
+#final_model_prediction(test_data)
+```

@@ -1,0 +1,163 @@
+---
+title: "Homework 4"
+author: "Ivan Wolansky"
+date: "4/13/2020"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+**Problem 1 (Regression Trees)**
+
+![Sketch of A Regression Tree](C:/Users/iawol/Desktop/College/Senior/2nd Semester/ML/HW4/Tree.jpg)
+![Sketch of A Partition](C:/Users/iawol/Desktop/College/Senior/2nd Semester/ML/HW4/Partition.jpg)
+
+**Problem 2 (Bagging)**
+For the voting approach, we get that the probabilities less than 0.5 classify as green while those greater than 0.5 classify as red. Therefore, we get 4 votes for green and 6 for red, so for this method we get red.
+
+For the average probability approach, we sum the probabilities and divide by 10, giving us 0.45. Because this probability is less than 0.5, we get green.
+
+**Problem 3 (Boosting)**
+```{r}
+# importing training data and creating training set
+zip_3 <- read.table("train_3.txt", header=FALSE, sep=",")
+zip_8 <- read.table("train_8.txt", header=FALSE, sep=",")
+X_train <- rbind(as.matrix(zip_3), as.matrix(zip_8))
+y_train <- as.matrix(c(rep(-1, nrow(zip_3)), rep(1, nrow(zip_8))))
+
+# importing testing data and creating testing set
+zip_test <- as.matrix(read.table("zip_test.txt", header=FALSE, sep=" "))
+zip_test <- zip_test[zip_test[, 1] == 3 | zip_test[, 1] == 8,]
+X_test <- zip_test[, -1]
+y_test <- zip_test[, 1]
+y_test[y_test == 3] <- -1
+y_test[y_test == 8] <- 1
+
+# combining training and testing for cross-validation
+X <- rbind(X_train, X_test)
+y <- c(y_train, y_test)
+
+# setting parameters for AdaBoost with CV
+K <- 5
+B <- 80
+```
+
+```{r}
+train <- function(X, w, y) {
+  err_list <- rep(NA, ncol(X))
+  theta_list <- rep(NA, ncol(X))
+  m_list <- rep(NA, ncol(X))
+  
+  # finding the optimal theta in each j dimension
+  for (j in 1:ncol(X)) {
+    # sorting data by dimension
+    idx <- order(X[, j])
+    x_j <- X[idx, j]
+    
+    # getting weight while shifting threshold right
+    cumsum_w <- cumsum(y[idx] * w[idx])
+    
+    # making sure that the point doesn't like multiple elements that have the same value
+    cumsum_w[duplicated(x_j) == 1] <- NA
+    
+    # finding optimal threshold
+    max_idx <- which.max(abs(cumsum_w))
+    m_list[j] <- ((cumsum_w[max_idx] < 0) * 2) - 1
+    theta_list[j] <- x_j[max_idx]
+    c <- (((x_j > theta_list[j]) * 2) - 1) * m_list[j]
+    err_list[j] <- w %*% (c != y)
+  }
+  j <- which.min(err_list)
+  
+  return(list(j=j, theta=theta_list[j], m=m_list[j]))
+}
+
+classify <- function(X, pars) {
+  return((2 * (X[, pars$j] > pars$theta) - 1) * pars$m)
+}
+
+agg_class <- function(X, alpha, allPars) {
+  c_i <- matrix(0, nrow=nrow(X), ncol=length(alpha)) 
+  for (b in 1:length(alpha)) {
+    c_i[, b] <- classify(X, allPars[[b]])
+  }
+  
+  c <- c_i %*% alpha
+  
+  return(sign(c))
+}
+
+AdaBoost <- function(X, y, B) {
+  
+  # initialization
+  allPars <- rep(list(list()), B)
+  alpha <- rep(0, B)
+  w <- rep(1/nrow(X), nrow(X))
+  
+  for (b in 1:B) {
+    
+    # training our base classifier
+    allPars[[b]] <- train(X, w, y)
+    
+    # computing error
+    error <- (w %*% (y != classify(X, allPars[[b]]))/sum(w))[1]
+    
+    # computing the voting weights
+    alpha[b] <- log((1-error)/error)
+    
+    # recomputing weights
+    w <- w * exp(alpha[b]*(y != classify(X, allPars[[b]])))
+  }
+  return(list(allPars=allPars, alpha=alpha))
+}
+```
+
+```{r}
+training_error <- matrix(0,nrow=B,ncol=K)
+testing_error <- matrix(0,nrow=B,ncol=K)
+set.seed(0)
+for (i in 1:K) {
+  sample <- sample(seq_len(nrow(X)), size = floor(0.8 * nrow(X)), replace = F)
+  X_train <- X[sample, ]
+  X_test <- X[-sample, ]
+  y_train <- y[sample]
+  y_test <- y[-sample]
+  
+  ada_model <- AdaBoost(X_train, y_train, B)
+
+  for (b in 1:B) {
+    training_error[b, i] <- mean(y_train != agg_class(X_train, ada_model$alpha[1:b], 
+                                                      ada_model$allPars[1:b]))
+    testing_error[b, i] <- mean(y_test != agg_class(X_test, ada_model$alpha[1:b], 
+                                                    ada_model$allPars[1:b]))
+  }
+}
+```
+
+```{r}
+library(reshape2)
+
+# reshaping data to be plotted in ggplot2
+training_error_df <- as.data.frame(training_error)
+training_error_df$b <- 1:nrow(training_error_df)
+training_plot_df <- melt(training_error_df, id="b")
+
+testing_error_df <- as.data.frame(testing_error)
+testing_error_df$b <- 1:nrow(testing_error_df)
+testing_plot_df <-  melt(testing_error_df, id="b")
+```
+
+```{r}
+library(ggplot2)
+ggplot() +
+  geom_line(data=training_plot_df, aes(x=b, y=value, color=variable, group=variable)) +
+  ggtitle(label="Cross-Validation Training Error") +
+  xlab(label="# of base classifiers") +
+  ylab(label="Error")
+
+ggplot() +
+  geom_line(data=testing_plot_df, aes(x=b, y=value, color=variable, group=variable)) +
+  ggtitle(label="Cross-Validation Testing Error") +
+  xlab(label="# of base classifiers") +
+  ylab(label="Error")
+```

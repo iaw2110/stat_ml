@@ -1,0 +1,137 @@
+---
+title: "Homework 3"
+author: "Ivan Wolansky"
+date: "3/13/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Problem 1 (Kernelized Nearest Neighbor Classification, 6 points)
+1. \begin{align*}
+d^{2}(x, x') = \|x-x'\|_{2}^{2}\\
+= \langle x, x \rangle -2 \langle x, x' \rangle + \langle x', x' \rangle
+\end{align*}
+2. \begin{align*} \textrm{Given } K(x, x') = \langle \phi(x), \phi(x')\rangle_{F}, \textrm{ we have: } \langle x, x \rangle -2 \langle x, x' \rangle + \langle x', x' \rangle = K(x, x), -2K(x, x') + K(x', x')\\
+= d_{K}^{2}(x, x')
+\end{align*}
+3. $d_{K}$ calculates the symmetric distance between shapes with their uncertainty explained by K.
+
+## Problem 2 (Ridge Regression and Lasso for Correlated Variables, ISL 6.5, 8 points)
+
+1. Here, we know that $x_{11} = x_{12} \textrm{ which implies } = x_{1} \textrm{ and } x_{21} = x_{22} \textrm{ which implies } = x_{2}$. Therefore, the ridge optimization problem is:
+$$(y_{1}-\hat \beta_{1}x_{1}+\hat \beta_{2}x_{1})^{2} + (y_{2}-\hat \beta_{1}x_{2} - \hat \beta_{2}x_{2})^{2} + \lambda(\hat \beta_{1}^{2} + \hat \beta_{2}^{2})$$
+
+2. Here, we can say that $\hat \beta_{1} = \hat \beta_{2}$ if we take the derivative w.r.t. $\beta_{1} \textrm{ and } \beta_{2}$ we get: $$\hat \beta_{1}(x_{1}^{2} + x_{2}^{2} + \lambda) + \hat \beta_{2}(x_{1}^{2} + x_{2}^{2}) = y_{1}x_{1} + y_{2}x_{2}$$ and $$\hat \beta_{1}(x_{1}^{2} + x_{2}^{2}) + \hat \beta_{2}(x_{1}^{2} + x_{2}^{2} + \lambda) = y_{1}x_{1} + y_{2}x_{2}$$. 
+When we subtract these two equations, we end up with: $\hat \beta_{1} = \hat \beta_{2}$
+
+3. Again, we know that $x_{11} = x_{12} \textrm{ which implies } = x_{1} \textrm{ and } x_{21} = x_{22} \textrm{ which implies } = x_{2}$. Therefore, the lasso optimization problem is:
+$$(y_{1}-\hat \beta_{1}x_{1}+\hat \beta_{2}x_{1})^{2} + (y_{2}-\hat \beta_{1}x_{2} - \hat \beta_{2}x_{2})^{2} + \lambda(|\hat \beta_{1}| + |\hat \beta_{2}|)$$
+
+4. We start by looking at the alternative lasso problem: $$(y_{1}-\hat \beta_{1}x_{1}+\hat \beta_{2}x_{1})^{2} + (y_{2}-\hat \beta_{1}x_{2} - \hat \beta_{2}x_{2})^{2} \textrm{ where } \lambda(|\hat \beta_{1}| + |\hat \beta_{2}|) \leq s$$
+
+Given the constraints of the problem, ($x_{11} = x_{12}, x_{21} = x_{22}, x_{11} + x_{21} = 0, x_{12} + x_{22} = 0, \textrm{ and } y_{1} + y_{2} = 0)$, we therefore minimize: $$2[y_{1]}-(\hat \beta_{1} + \hat \beta_{2})x_{1}]^{2} \geq 0$$
+
+We can see that the solution to this problem is $\hat \beta_{1} + \hat \beta_{2} = \frac{y_{1}}{x_{1}}$, therefore, the lasso optimization problem has a set of solutions, not just one: $$\{\hat \beta_{1}, \hat \beta_{2} : \hat \beta_{1} + \beta_{2} = s \textrm{ where } \hat \beta_{1}, \hat \beta_{2} \geq 0 \textrm{ and } \hat \beta_{1} + \hat \beta_{2} = -s \textrm{ where } \hat \beta_{1}, \hat \beta_{2} \leq 0\}$$
+
+## Problem 3 (SVM, 16 points)
+
+```{r}
+library(e1071)
+set.seed(1111)
+```
+
+```{r}
+# reading in data and assigning labels
+train.5 <- read.table("train.5.txt", header=FALSE, sep=",")
+train.5 <-as.matrix(cbind(train.5, rep(-1, nrow(train.5))))
+colnames(train.5)[257] <- 'y'
+train.6 <- read.table("train.6.txt", header=FALSE, sep=",")
+train.6 <-as.matrix(cbind(train.6, rep(1, nrow(train.6))))
+colnames(train.6)[257] <- 'y'
+```
+
+```{r}
+# combining data into one matrix
+data <- rbind(train.5, train.6)
+```
+
+```{r}
+# sampling the data to make the train and test sets
+sample <- sample.int(nrow(data), size = floor(0.8 * nrow(data)), replace = F)
+train <- data[sample, ]
+test <- data[-sample, ]
+```
+
+```{r}
+# splitting train and test into the x values and the variable labels
+X_train <- train[, 1:256]
+y_train <- train[, 257]
+X_test <- test[, 1:256]
+y_test <- test[, 257]
+```
+
+```{r}
+trainset <- data.frame(x=X_train, y=as.factor(y_train))
+```
+
+```{r}
+# cross-validation with margin
+tuned_margin <- tune(svm, train.x=X_train, train.y=as.factor(y_train), kernel="linear", ranges=list(cost=10^(seq(-5, 2, 0.5))), scale=FALSE)
+```
+
+1. (a)
+
+```{r}
+# plotting cross-validation estimates of misclassification rate for the linear case
+plot(tuned_margin, main="Cross-Validation Estimates of Misclassification for Linear Case")
+```
+```{r}
+# cross-validation with margin and kernel
+tuned_margin_and_kernel <- tune(svm, train.x=X_train, train.y=as.factor(y_train), kernel="radial", ranges=list(cost=10^(seq(-5, 2, 0.5)), gamma=c(0.001, 0.01, 0.1, 1)),  scale=FALSE)
+```
+
+1. (b)
+
+```{r}
+# plotting cross-validation estimates of misclassification rate for the RBF as heatmap (varying gamma and cost)
+plot(tuned_margin_and_kernel, main="Cross-Validation Estimates of Misclassification for RBF")
+```
+
+```{r}
+# training svm_margin
+svm_margin <- tuned_margin$best.model
+  
+# training svm_margin_and_kernel
+svm_margin_and_kernel <- tuned_margin_and_kernel$best.model
+```
+
+2.
+
+```{r}
+# predicting on the test set using margin
+margin_preds <- predict(svm_margin, X_test)
+
+# calculating misclassification rate
+margin_mis <- sum(margin_preds != y_test) / length(y_test)
+
+# outputting misclassification rate and best parameters
+cat("The misclassification rate of the linear model is:", margin_mis, "\n")
+cat("The cost parameter (margin) for the linear model is:", tuned_margin$best.parameters$cost)
+```
+
+```{r}
+# predicting on the test set
+margin_and_kernel_preds <- predict(svm_margin_and_kernel, X_test)
+
+# calculating misclassification rate
+margin_and_kernel_mis <- sum(margin_and_kernel_preds != y_test) / length(y_test)
+
+# outputting misclassification rate and best parameters
+cat("The misclassification rate of the non-linear model is:", margin_and_kernel_mis, "\n")
+cat("The cost parameter (margin) for the non-linear model is:", tuned_margin_and_kernel$best.parameters$cost, "while the gamma for the kernel bandwidth is:", tuned_margin_and_kernel$best.parameters$gamma)
+```
+
+Based on the above misclassification rates, I believe that we can conclude that the non-linear SVM is the best choice for this data.

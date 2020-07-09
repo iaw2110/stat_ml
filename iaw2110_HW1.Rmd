@@ -1,0 +1,120 @@
+---
+title: "HW 1"
+author: "Ivan Wolansky"
+date: "2/11/2020"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**Problem 1 (PCA)**
+
+1. 
+
+![First PCA and projection of point onto the line.](C:/Users/iawol/Desktop/College/Senior/2nd Semester/ML/HW1/PCA Graph.jpg)
+
+2.
+
+  a) There are 10304 principal components in total.
+  
+  b) We can approximately reconstruct the represent a specific image x by first defining the projection of x onto each principal component $a_{i}$ to obtain the coefficient $b_{i}$:\newline 
+  
+|                      $$b_{i} = \langle x, a_{i} \rangle$$\newline
+|                      We can then represent the image by expanding the basis:\newline
+  
+|                      $$x = \sum_{i=1}^{c} b_{i}a_{i}$$
+  
+|                      And if we reconstruct x from the first 48 components then we just set c to equal 48:\newline
+  
+|                      $$\hat x = \sum_{i=1}^{48} b_{i}a_{i}$$
+
+**Problem 2 (Posterior distribution)**
+
+Likelihood = $(\frac{1}{2})({\frac{n}{2} \choose x})((\pi^{1}(1-\pi^{1})^{n-x})\pi^{2}(1-\pi^{2})^{n-x}))$
+
+Posterior Distribution = likelihood * prior / evidence
+
+$P((\pi^{1}, \pi^{2})|(Y^{T_{1}}_{1},...,Y^{T_{n}}_{n}, T_{1},...,T_{n})) = \frac{(\frac{1}{2})({\frac{n}{2} \choose x})((\pi^{1}(1-\pi^{1})^{n-x})\pi^{2}(1-\pi^{2})^{n-x}))}{\int^{1}_{0}\int^{1}_{0}(\frac{1}{2})({\frac{n}{2} \choose x})((\pi^{1}(1-\pi^{1})^{n-x})\pi^{2}(1-\pi^{2})^{n-x}))d\pi^{1}d\pi^{2}}$
+
+**Problem 3 (PCA of Stock Prices)**
+
+```{r message=FALSE}
+library(quantmod)
+library(devtools)
+install_github('vqv/ggbiplot')
+library(ggbiplot)
+library(plotly)
+```
+
+1. 
+
+```{r}
+symbols <- c("MMM", "AXP","AAPL","BA","CAT","CVX","CSCO","KO","DIS","DD",
+"XOM","GE","GS","HD","IBM","INTC","JNJ","JPM","MCD","MRK","MSFT","NKE","PFE","PG","TRV","UTX","UNH","VZ","V","WMT")
+
+xts_list <- lapply(symbols, getSymbols, auto.assign = F, from = "2018-01-01", to = "2019-01-01")
+
+dow30 <- data.frame(do.call(merge.xts, xts_list))
+
+dow30 <- dow30[, grep(pattern="Close",colnames(dow30))]
+colnames(dow30) <- sub(".Close", "", colnames(dow30))
+
+head(dow30)
+```
+
+2.
+
+```{r}
+pca1 <- princomp(dow30, cor=FALSE)
+ggplotly(ggbiplot(pca1, main="Biplot of Dow30 Closing Prices PCA w/ Covariance"))
+screeplot(pca1, main="Screeplot of Dow30 Closing Prices PCA w/ Covariance")
+pca1
+```
+
+I would say that there is some structure in the biplot. We see that there are many dates that are close together. Most of the stocks are very close together and therefore very similar in how much they influence the principal components. GS, MM, IBM, and CAT are very similar, with GS showing the most effect to the first principal component. UNH and AAPL are in the opposite direction and extend out to effect it as well, and AAPL also shows the most in the second principal component.
+
+The screeplot shows that the first two principal components are the most important.
+
+3.
+
+```{r}
+pca2 <- princomp(dow30, cor=TRUE)
+ggplotly(ggbiplot(pca2, main="Biplot of Dow30 Closing Prices PCA w/ Correlation Matrix"))
+screeplot(pca2, main="Screeplot of Dow30 Closing Prices PCA w/ Correlation Matrix")
+```
+
+There is some structure, as most of the stocks extend right, left, or up. After using the correlation matrix we see that many of the stock vectors are extend far in the first principal component. This means that those extending to the right influence the first principal component a lot, along with those moving to the left. Intersetingly, there are a number that are nearly vertical, implying that they heavily influenced the second principal component.
+
+In the screeplot I believe that the first three principal components are shown to be most important.
+4.
+
+```{r}
+returns <- matrix(NA, ncol=ncol(dow30), nrow=nrow(dow30))
+
+
+for (i in 1:ncol(dow30)) {
+  for (j in 2:nrow(dow30)) {
+    returns[j, i] <- dow30[j, i] - dow30[j-1, i]
+  }
+}
+
+returns <- data.frame(returns)
+colnames(returns) <- colnames(dow30)
+returns <- returns[-1, ]
+rownames(returns) <- NULL
+
+```
+
+```{r}
+pca3 <- princomp(returns, cor=TRUE)
+ggplotly(ggbiplot(pca3, main="Biplot of Dow30 Returns PCA w/ Correlation Matrix"))
+screeplot(pca3, main="Screeplot of Dow30 Returns PCA w/ Correlation Matrix")
+```
+
+The screeplot seems to tell us that the first principal is important in differentiating between the 30 stocks.
+
+If the stocks fluctuated then I would expect the screeplot to flatten out so that the principal components were very similar.
